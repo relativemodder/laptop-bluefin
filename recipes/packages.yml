@@ -10,7 +10,8 @@ modules:
         - micro
         - qt5ct
         - qt6ct
-        - starship
+        - fuse-libs
+        - mangohud
     remove:
       packages:
         - firefox
