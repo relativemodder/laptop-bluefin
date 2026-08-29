@@ -8,9 +8,7 @@ modules:
         - brycensranch/gpu-screen-recorder-git
     install:
       packages:
-        - micro
-        - qt5ct
-        - qt6ct
+        - kvantum
         - fuse-libs
         - mangohud
         - resources
