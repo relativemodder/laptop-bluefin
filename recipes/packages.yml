@@ -4,7 +4,7 @@ modules:
   - type: dnf
     repos:
       copr:
-        - atim/starship
+        - atim/resources
     install:
       packages:
         - micro
@@ -12,6 +12,7 @@ modules:
         - qt6ct
         - fuse-libs
         - mangohud
+        - resources
     remove:
       packages:
         - firefox
