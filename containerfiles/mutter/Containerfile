@@ -1,15 +1,17 @@
 RUN set -eux; \
     dnf5 install -y \
-      bash-completion cairo-devel colord-devel gcc gcc-c++ git glib2-devel \
-      gnome-desktop4-devel graphene-devel gtk4-devel \
+      bash-completion cairo-devel colord-devel cvt egl-wayland-devel gcc gcc-c++ git glib2-devel \
+      gnome-desktop4-devel gnome-settings-daemon-devel graphene-devel gtk4-devel \
       gobject-introspection-devel libcanberra-devel libdisplay-info-devel \
-      libdrm-devel libei-devel libgudev-devel libinput-devel libwacom-devel \
-      libwayland-devel libX11-devel libXau-devel libXcomposite-devel \
+      libdrm-devel libei-devel libeis-devel libgudev-devel libinput-devel libwacom-devel \
+      wayland-devel libX11-devel libXau-devel libXcomposite-devel \
       libXcursor-devel libXdamage-devel libXext-devel libXfixes-devel \
       libXi-devel libXinerama-devel libXrandr-devel libxkbcommon-devel \
-      lcms2-devel mesa-libgbm-devel meson ninja-build pango-devel \
-      pipewire-devel pixman-devel pkgconf-pkg-config python3-docutils \
-      python3-gobject sysprof-devel wayland-protocols \
+      lcms2-devel mesa-libEGL-devel mesa-libGL-devel mesa-libgbm-devel \
+      meson ninja-build pango-devel \
+      pipewire-devel pixman-devel pkgconf-pkg-config python3-argcomplete \
+      python3-docutils python3-gobject startup-notification-devel sysprof-devel \
+      wayland-protocols-devel \
       xorg-x11-server-Xwayland; \
     workdir="$(mktemp -d)"; \
     trap 'rm -rf "$workdir"' EXIT; \
@@ -21,6 +23,11 @@ RUN set -eux; \
       https://github.com/GNOME/mutter.git "$workdir/mutter"; \
     test "$(git -C "$workdir/mutter" rev-parse HEAD)" = \
       8fe247a25a5b773e506c3f5f442ca0b7e3d5dc97; \
+    rm -rf "$workdir/mutter/subprojects/gvdb"; \
+    git clone --filter=blob:none https://github.com/GNOME/gvdb.git \
+      "$workdir/mutter/subprojects/gvdb"; \
+    git -C "$workdir/mutter/subprojects/gvdb" checkout --detach \
+      b54bc5da25127ef416858a3ad92e57159ff565b3; \
     git -C "$workdir/tearing" show \
       'e41f26e15eab654163a61e5a2e5a3fc34e4d38d1:mutter-tearing-50.4.patch' \
       > "$workdir/mutter-tearing.patch"; \
