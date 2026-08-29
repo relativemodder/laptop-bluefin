@@ -5,6 +5,7 @@ modules:
     repos:
       copr:
         - atim/resources
+        - brycensranch/gpu-screen-recorder-git
     install:
       packages:
         - micro
@@ -13,6 +14,7 @@ modules:
         - fuse-libs
         - mangohud
         - resources
+        - gpu-screen-recorder-ui
     remove:
       packages:
         - firefox

@@ -7,5 +7,4 @@ configurations:
     install:
       - it.mijorus.gearlever
       - ca.desrt.dconf-editor
-      - com.dec05eba.gpu_screen_recorder
   - scope: user
