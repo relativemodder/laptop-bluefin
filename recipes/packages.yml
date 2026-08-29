@@ -1,0 +1,17 @@
+---
+# yaml-language-server: $schema=https://schema.blue-build.org/module-list-v1.json
+modules:
+  - type: dnf
+    repos:
+      copr:
+        - atim/starship
+    install:
+      packages:
+        - micro
+        - qt5ct
+        - qt6ct
+        - starship
+    remove:
+      packages:
+        - firefox
+        - firefox-langpacks
