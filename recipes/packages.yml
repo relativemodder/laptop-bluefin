@@ -6,6 +6,7 @@ modules:
       copr:
         - atim/resources
         - brycensranch/gpu-screen-recorder-git
+        - daniel-g-carrasco/wayland-scroll-factor
     install:
       packages:
         - kvantum
@@ -13,6 +14,7 @@ modules:
         - mangohud
         - resources
         - gpu-screen-recorder-ui
+        - wayland-scroll-factor
     remove:
       packages:
         - firefox
