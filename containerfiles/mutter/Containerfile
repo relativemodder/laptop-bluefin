@@ -1,3 +1,5 @@
+COPY mutter-tearing-50.4.patch /tmp/mutter-tearing.patch
+
 RUN set -eux; \
     dnf5 install -y \
       bash-completion cairo-devel colord-devel cvt egl-wayland-devel gcc gcc-c++ git glib2-devel \
@@ -15,10 +17,6 @@ RUN set -eux; \
       xorg-x11-server-Xwayland; \
     workdir="$(mktemp -d)"; \
     trap 'rm -rf "$workdir"' EXIT; \
-    git clone --filter=blob:none \
-      https://github.com/franzjeger/mutter-tearing-arch.git "$workdir/tearing"; \
-    git -C "$workdir/tearing" checkout --detach \
-      e41f26e15eab654163a61e5a2e5a3fc34e4d38d1; \
     git clone --filter=blob:none --branch 50.4 \
       https://github.com/GNOME/mutter.git "$workdir/mutter"; \
     test "$(git -C "$workdir/mutter" rev-parse HEAD)" = \
@@ -28,11 +26,8 @@ RUN set -eux; \
       "$workdir/mutter/subprojects/gvdb"; \
     git -C "$workdir/mutter/subprojects/gvdb" checkout --detach \
       b54bc5da25127ef416858a3ad92e57159ff565b3; \
-    git -C "$workdir/tearing" show \
-      'e41f26e15eab654163a61e5a2e5a3fc34e4d38d1:mutter-tearing-50.4.patch' \
-      > "$workdir/mutter-tearing.patch"; \
-    git -C "$workdir/mutter" apply --check "$workdir/mutter-tearing.patch"; \
-    git -C "$workdir/mutter" apply "$workdir/mutter-tearing.patch"; \
+    git -C "$workdir/mutter" apply --check /tmp/mutter-tearing.patch; \
+    git -C "$workdir/mutter" apply /tmp/mutter-tearing.patch; \
     meson setup "$workdir/mutter-build" "$workdir/mutter" \
       --prefix=/usr --libdir=lib64 \
       -Ddocs=false -Degl_device=true -Dinstalled_tests=false \
