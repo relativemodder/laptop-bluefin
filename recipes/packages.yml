@@ -17,6 +17,9 @@ modules:
         - gpu-screen-recorder-ui
         - wayland-scroll-factor
         - gnome-rounded-blur
+        - libvirtd
+        - qemu
+        - dnsmasq
     remove:
       packages:
         - firefox
