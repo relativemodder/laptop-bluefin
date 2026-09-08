@@ -5,7 +5,6 @@ modules:
     repos:
       copr:
         - atim/resources
-        - brycensranch/gpu-screen-recorder-git
         - daniel-g-carrasco/wayland-scroll-factor
         - aneagle/gnome-rounded-blur
     install:
@@ -14,12 +13,12 @@ modules:
         - fuse-libs
         - mangohud
         - resources
-        - gpu-screen-recorder-ui
         - wayland-scroll-factor
         - gnome-rounded-blur
         - libvirtd
         - qemu
         - dnsmasq
+        - libvirt-daemon-driver-qemu
     remove:
       packages:
         - firefox
