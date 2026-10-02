@@ -65,6 +65,7 @@ snippets:
           knighttime-devel \
           kwayland-devel \
           kscreenlocker-devel \
+          plasma-activities-devel \
           libcap-devel \
           libcanberra-devel \
           libdisplay-info-devel \

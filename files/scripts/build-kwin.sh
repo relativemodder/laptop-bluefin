@@ -37,12 +37,19 @@ cmake_install_project() {
     local name="$1"
     local source="${SOURCE_ROOT}/${name}"
     local build="${BUILD_ROOT}/${name}"
+    local -a cmake_options=(
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_INSTALL_PREFIX=/usr
+        -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}"
+        -DBUILD_TESTING=OFF
+    )
+
+    if [[ "${name}" == kwin ]]; then
+        cmake_options+=(-DKWIN_BUILD_ACTIVITIES=ON)
+    fi
 
     cmake -S "${source}" -B "${build}" -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}" \
-        -DBUILD_TESTING=OFF
+        "${cmake_options[@]}"
     cmake --build "${build}" --parallel "$(nproc)"
     DESTDIR="${PREFIX_ROOT}" cmake --install "${build}"
 }
@@ -90,5 +97,15 @@ fetch_repo kwin \
 git -C "${SOURCE_ROOT}/kwin" apply --check /tmp/overview-3-finger.patch
 git -C "${SOURCE_ROOT}/kwin" apply /tmp/overview-3-finger.patch
 cmake_install_project kwin
+
+if ! grep -q 'KWIN_BUILD_ACTIVITIES:BOOL=ON' "${BUILD_ROOT}/kwin/CMakeCache.txt"; then
+    printf 'KWin was built without KActivities support\n' >&2
+    exit 1
+fi
+
+if ! strings "${PREFIX_ROOT}/usr/bin/kwin_wayland" | grep -q -- '--no-kactivities'; then
+    printf 'The built KWin binary does not support --no-kactivities\n' >&2
+    exit 1
+fi
 
 rm -rf "${WORKDIR}"
