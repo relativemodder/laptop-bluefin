@@ -1,0 +1,137 @@
+diff --git a/src/effect/effecttogglablestate.h b/src/effect/effecttogglablestate.h
+--- a/src/effect/effecttogglablestate.h
++++ b/src/effect/effecttogglablestate.h
+@@ -11,6 +11,8 @@
+ #include <QAction>
+ #include <QObject>
+ 
++#include <functional>
++
+ namespace KWin
+ {
+ 
+@@ -123,7 +125,13 @@
+     EffectTogglableGesture(EffectTogglableState *state);
+ 
+     void addTouchpadPinchGesture(PinchDirection dir, uint fingerCount);
+-    void addTouchpadSwipeGesture(SwipeDirection dir, uint fingerCount);
++    /**
++     * Registers a touchpad swipe gesture for this state.
++     *
++     * @param predicate When given, the gesture only feeds the state while it returns @c true.
++     *        Useful to hand a gesture over to another consumer depending on the current setup.
++     */
++    void addTouchpadSwipeGesture(SwipeDirection dir, uint fingerCount, std::function<bool()> predicate = {});
+     void addTouchscreenSwipeGesture(SwipeDirection direction, uint fingerCount);
+ 
+ private:
+diff --git a/src/effect/effecttogglablestate.cpp b/src/effect/effecttogglablestate.cpp
+--- a/src/effect/effecttogglablestate.cpp
++++ b/src/effect/effecttogglablestate.cpp
+@@ -213,10 +213,22 @@
+     effects->registerTouchpadPinchShortcut(opposite(direction), fingerCount, m_state->deactivateAction(), m_state->regressCallback());
+ }
+ 
+-void EffectTogglableGesture::addTouchpadSwipeGesture(SwipeDirection direction, uint fingerCount)
++static std::function<void(qreal progress)> filterProgress(std::function<void(qreal progress)> callback, const std::function<bool()> &predicate)
+ {
+-    effects->registerTouchpadSwipeShortcut(direction, fingerCount, m_state->activateAction(), m_state->progressCallback());
+-    effects->registerTouchpadSwipeShortcut(opposite(direction), fingerCount, m_state->deactivateAction(), m_state->regressCallback());
++    if (!predicate) {
++        return callback;
++    }
++    return [callback, predicate](qreal progress) {
++        if (predicate()) {
++            callback(progress);
++        }
++    };
++}
++
++void EffectTogglableGesture::addTouchpadSwipeGesture(SwipeDirection direction, uint fingerCount, std::function<bool()> predicate)
++{
++    effects->registerTouchpadSwipeShortcut(direction, fingerCount, m_state->activateAction(), filterProgress(m_state->progressCallback(), predicate));
++    effects->registerTouchpadSwipeShortcut(opposite(direction), fingerCount, m_state->deactivateAction(), filterProgress(m_state->regressCallback(), predicate));
+ }
+ 
+ void EffectTogglableGesture::addTouchscreenSwipeGesture(SwipeDirection direction, uint fingerCount)
+diff --git a/src/plugins/overview/overvieweffect.cpp b/src/plugins/overview/overvieweffect.cpp
+--- a/src/plugins/overview/overvieweffect.cpp
++++ b/src/plugins/overview/overvieweffect.cpp
+@@ -32,17 +32,30 @@
+     , m_shutdownTimer(new QTimer(this))
+     , m_manager(new KRunner::RunnerManager(this))
+ {
++    // Three fingers are reserved for switching desktops vertically whenever there are
++    // workspaces above or below the current one, so the overview takes over that gesture
++    // only when the desktops form a single row. Four fingers are the fallback otherwise.
++    const auto singleDesktopRow = []() {
++        return effects->desktopGridHeight() <= 1;
++    };
++    const auto multipleDesktopRows = []() {
++        return effects->desktopGridHeight() > 1;
++    };
++
+     auto gesture = new EffectTogglableGesture(m_overviewState);
+-    gesture->addTouchpadSwipeGesture(SwipeDirection::Up, 4);
++    gesture->addTouchpadSwipeGesture(SwipeDirection::Up, 3, singleDesktopRow);
++    gesture->addTouchpadSwipeGesture(SwipeDirection::Up, 4, multipleDesktopRows);
+     gesture->addTouchscreenSwipeGesture(SwipeDirection::Up, 3);
+ 
+     auto transitionGesture = new EffectTogglableGesture(m_transitionState);
+-    transitionGesture->addTouchpadSwipeGesture(SwipeDirection::Up, 4);
++    transitionGesture->addTouchpadSwipeGesture(SwipeDirection::Up, 3, singleDesktopRow);
++    transitionGesture->addTouchpadSwipeGesture(SwipeDirection::Up, 4, multipleDesktopRows);
+     transitionGesture->addTouchscreenSwipeGesture(SwipeDirection::Up, 3);
+     m_transitionState->stop();
+ 
+     auto gridGesture = new EffectTogglableGesture(m_gridState);
+-    gridGesture->addTouchpadSwipeGesture(SwipeDirection::Down, 4);
++    gridGesture->addTouchpadSwipeGesture(SwipeDirection::Down, 3, singleDesktopRow);
++    gridGesture->addTouchpadSwipeGesture(SwipeDirection::Down, 4, multipleDesktopRows);
+     gridGesture->addTouchscreenSwipeGesture(SwipeDirection::Down, 3);
+ 
+     connect(m_overviewState, &EffectTogglableState::inProgressChanged, this, &OverviewEffect::overviewGestureInProgressChanged);
+diff --git a/src/virtualdesktops.cpp b/src/virtualdesktops.cpp
+--- a/src/virtualdesktops.cpp
++++ b/src/virtualdesktops.cpp
+@@ -836,6 +836,13 @@
+ 
+ void VirtualDesktopManager::gestureReleasedY()
+ {
++    // The horizontal gesture cancels this action (and vice versa) as soon as the swipe axis
++    // is known. Bail out then, so that an unrelated axis doesn't wipe out the offset that
++    // the actual gesture has accumulated.
++    if (m_currentDesktopOffset.y() == 0) {
++        return;
++    }
++
+     auto current = currentDesktop();
+     // Note that if desktop wrapping is disabled and there's no desktop above or below,
+     // above() and below() will return the current desktop.
+@@ -852,11 +859,16 @@
+     } else {
+         Q_EMIT currentChangingCancelled();
+     }
+-    m_currentDesktopOffset = QPointF(0, 0);
++    m_currentDesktopOffset.setY(0);
+ }
+ 
+ void VirtualDesktopManager::gestureReleasedX()
+ {
++    // See gestureReleasedY() - only the axis that actually moved may resolve the gesture.
++    if (m_currentDesktopOffset.x() == 0) {
++        return;
++    }
++
+     // Note that if desktop wrapping is disabled and there's no desktop to left or right,
+     // toLeft() and toRight() will return the current desktop.
+     VirtualDesktop *current = currentDesktop();
+@@ -873,7 +885,7 @@
+     } else {
+         Q_EMIT currentChangingCancelled();
+     }
+-    m_currentDesktopOffset = QPointF(0, 0);
++    m_currentDesktopOffset.setX(0);
+ }
+ 
+ void VirtualDesktopManager::initSwitchToShortcuts()
