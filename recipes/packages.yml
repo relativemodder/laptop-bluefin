@@ -5,16 +5,11 @@ modules:
     repos:
       copr:
         - atim/resources
-        - daniel-g-carrasco/wayland-scroll-factor
-        - aneagle/gnome-rounded-blur
     install:
       packages:
-        - kvantum
         - fuse-libs
         - mangohud
         - resources
-        - wayland-scroll-factor
-        - gnome-rounded-blur
         - libvirtd
         - qemu
         - dnsmasq
