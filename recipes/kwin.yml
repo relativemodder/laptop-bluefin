@@ -34,6 +34,7 @@ snippets:
           wayland-devel \
           wayland-protocols-devel \
           xcb-util-devel \
+          xcb-util-cursor-devel \
           xcb-util-keysyms-devel \
           xcb-util-wm-devel \
           kdecoration-devel \
