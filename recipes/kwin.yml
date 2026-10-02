@@ -7,6 +7,7 @@ snippets:
         dnf install -y \
           cmake \
           extra-cmake-modules \
+          expat-devel \
           gcc-c++ \
           gettext \
           git \
