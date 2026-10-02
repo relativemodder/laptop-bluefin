@@ -28,4 +28,4 @@ git apply --check /path/to/laptop-bluefin/patches/kwin/overview-3-finger.patch
 git apply /path/to/laptop-bluefin/patches/kwin/overview-3-finger.patch
 ```
 
-The existing BlueBuild recipe does not build KWin from source by itself. A downstream KWin RPM/container build must apply this patch before compiling and replacing the base KWin packages.
+The BlueBuild recipe builds KWin from source in a `containerfile` module, applies this patch, and installs the resulting files into the image.
