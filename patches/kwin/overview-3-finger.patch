@@ -1,34 +1,7 @@
-diff --git a/src/effect/effecttogglablestate.h b/src/effect/effecttogglablestate.h
---- a/src/effect/effecttogglablestate.h
-+++ b/src/effect/effecttogglablestate.h
-@@ -11,6 +11,8 @@
- #include <QAction>
- #include <QObject>
- 
-+#include <functional>
-+
- namespace KWin
- {
- 
-@@ -123,7 +125,13 @@
-     EffectTogglableGesture(EffectTogglableState *state);
- 
-     void addTouchpadPinchGesture(PinchDirection dir, uint fingerCount);
--    void addTouchpadSwipeGesture(SwipeDirection dir, uint fingerCount);
-+    /**
-+     * Registers a touchpad swipe gesture for this state.
-+     *
-+     * @param predicate When given, the gesture only feeds the state while it returns @c true.
-+     *        Useful to hand a gesture over to another consumer depending on the current setup.
-+     */
-+    void addTouchpadSwipeGesture(SwipeDirection dir, uint fingerCount, std::function<bool()> predicate = {});
-     void addTouchscreenSwipeGesture(SwipeDirection direction, uint fingerCount);
- 
- private:
 diff --git a/src/effect/effecttogglablestate.cpp b/src/effect/effecttogglablestate.cpp
 --- a/src/effect/effecttogglablestate.cpp
 +++ b/src/effect/effecttogglablestate.cpp
-@@ -213,10 +213,22 @@
+@@ -208,10 +208,22 @@ void EffectTogglableGesture::addTouchpadPinchGesture(PinchDirection direction, u
      effects->registerTouchpadPinchShortcut(opposite(direction), fingerCount, m_state->deactivateAction(), m_state->regressCallback());
  }
  
@@ -54,12 +27,39 @@ diff --git a/src/effect/effecttogglablestate.cpp b/src/effect/effecttogglablesta
  }
  
  void EffectTogglableGesture::addTouchscreenSwipeGesture(SwipeDirection direction, uint fingerCount)
+diff --git a/src/effect/effecttogglablestate.h b/src/effect/effecttogglablestate.h
+--- a/src/effect/effecttogglablestate.h
++++ b/src/effect/effecttogglablestate.h
+@@ -11,6 +11,8 @@
+ #include <QAction>
+ #include <QObject>
+ 
++#include <functional>
++
+ namespace KWin
+ {
+ 
+@@ -113,7 +115,13 @@ public:
+     EffectTogglableGesture(EffectTogglableState *state);
+ 
+     void addTouchpadPinchGesture(PinchDirection dir, uint fingerCount);
+-    void addTouchpadSwipeGesture(SwipeDirection dir, uint fingerCount);
++    /**
++     * Registers a touchpad swipe gesture for this state.
++     *
++     * @param predicate When given, the gesture only feeds the state while it returns @c true.
++     *        Useful to hand a gesture over to another consumer depending on the current setup.
++     */
++    void addTouchpadSwipeGesture(SwipeDirection dir, uint fingerCount, std::function<bool()> predicate = {});
+     void addTouchscreenSwipeGesture(SwipeDirection direction, uint fingerCount);
+ 
+ private:
 diff --git a/src/plugins/overview/overvieweffect.cpp b/src/plugins/overview/overvieweffect.cpp
 --- a/src/plugins/overview/overvieweffect.cpp
 +++ b/src/plugins/overview/overvieweffect.cpp
-@@ -32,17 +32,30 @@
+@@ -32,16 +32,29 @@ OverviewEffect::OverviewEffect()
+     , m_gridBorder(new EffectTogglableTouchBorder(m_gridState))
      , m_shutdownTimer(new QTimer(this))
-     , m_manager(new KRunner::RunnerManager(this))
  {
 +    // Three fingers are reserved for switching desktops vertically whenever there are
 +    // workspaces above or below the current one, so the overview takes over that gesture
@@ -90,11 +90,10 @@ diff --git a/src/plugins/overview/overvieweffect.cpp b/src/plugins/overview/over
 +    gridGesture->addTouchpadSwipeGesture(SwipeDirection::Down, 4, multipleDesktopRows);
      gridGesture->addTouchscreenSwipeGesture(SwipeDirection::Down, 3);
  
-     connect(m_overviewState, &EffectTogglableState::inProgressChanged, this, &OverviewEffect::overviewGestureInProgressChanged);
 diff --git a/src/virtualdesktops.cpp b/src/virtualdesktops.cpp
 --- a/src/virtualdesktops.cpp
 +++ b/src/virtualdesktops.cpp
-@@ -836,6 +836,13 @@
+@@ -831,6 +831,13 @@ void VirtualDesktopManager::initShortcuts()
  
  void VirtualDesktopManager::gestureReleasedY()
  {
@@ -108,7 +107,7 @@ diff --git a/src/virtualdesktops.cpp b/src/virtualdesktops.cpp
      auto current = currentDesktop();
      // Note that if desktop wrapping is disabled and there's no desktop above or below,
      // above() and below() will return the current desktop.
-@@ -852,11 +859,16 @@
+@@ -847,11 +854,16 @@ void VirtualDesktopManager::gestureReleasedY()
      } else {
          Q_EMIT currentChangingCancelled();
      }
@@ -126,12 +125,10 @@ diff --git a/src/virtualdesktops.cpp b/src/virtualdesktops.cpp
      // Note that if desktop wrapping is disabled and there's no desktop to left or right,
      // toLeft() and toRight() will return the current desktop.
      VirtualDesktop *current = currentDesktop();
-@@ -873,7 +885,7 @@
+@@ -868,5 +880,5 @@ void VirtualDesktopManager::gestureReleasedX()
      } else {
          Q_EMIT currentChangingCancelled();
      }
 -    m_currentDesktopOffset = QPointF(0, 0);
 +    m_currentDesktopOffset.setX(0);
  }
- 
- void VirtualDesktopManager::initSwitchToShortcuts()
