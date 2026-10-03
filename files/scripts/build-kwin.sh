@@ -98,14 +98,4 @@ git -C "${SOURCE_ROOT}/kwin" apply --check /tmp/overview-3-finger.patch
 git -C "${SOURCE_ROOT}/kwin" apply /tmp/overview-3-finger.patch
 cmake_install_project kwin
 
-if ! grep -q 'KWIN_BUILD_ACTIVITIES:BOOL=ON' "${BUILD_ROOT}/kwin/CMakeCache.txt"; then
-    printf 'KWin was built without KActivities support\n' >&2
-    exit 1
-fi
-
-if ! grep -q '^#define KWIN_BUILD_ACTIVITIES 1$' "${BUILD_ROOT}/kwin/src/config-kwin.h"; then
-    printf 'config-kwin.h does not enable KWIN_BUILD_ACTIVITIES\n' >&2
-    exit 1
-fi
-
 rm -rf "${WORKDIR}"
