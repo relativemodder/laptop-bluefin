@@ -1,0 +1,320 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index ac1a3a5..0e5cef0 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -531,6 +531,7 @@ install(FILES
+     screenedgegestures.h
+     shadow.h
+     sm.h
++    swipetracker.h
+     tablet_input.h
+     tabletmodemanager.h
+     touch_input.h
+diff --git a/src/plugins/slide/slide.cpp b/src/plugins/slide/slide.cpp
+index 7d0a71c..1fa608c 100644
+--- a/src/plugins/slide/slide.cpp
++++ b/src/plugins/slide/slide.cpp
+@@ -93,8 +93,10 @@ void SlideEffect::reconfigure(ReconfigureFlags)
+ 
+ void SlideEffectScreen::reconfigure()
+ {
+-    const qreal springConstant = 300.0 / effects->animationTimeFactor();
+-    const qreal dampingRatio = 1.1;
++    // A critically damped spring with a higher stiffness matches the workspace-switch
++    // animation niri uses and settles noticeably faster than the old overdamped one.
++    const qreal springConstant = 1000.0 / effects->animationTimeFactor();
++    const qreal dampingRatio = 1.0;
+ 
+     m_motionX = SpringMotion(springConstant, dampingRatio);
+     m_motionY = SpringMotion(springConstant, dampingRatio);
+@@ -369,6 +371,12 @@ bool SlideEffectScreen::shouldElevate(const EffectWindow *w) const
+  */
+ void SlideEffectScreen::startAnimation(const QPointF &oldPos, VirtualDesktop *current, EffectWindow *movingWindow)
+ {
++    const bool fromGesture = m_state == State::ActiveGesture;
++    const QPointF velocity = fromGesture ? m_gestureTracker.velocity() : QPointF();
++    if (fromGesture) {
++        m_gestureTracker.reset();
++    }
++
+     if (m_state == State::Inactive) {
+         prepareSwitching();
+     }
+@@ -387,6 +395,16 @@ void SlideEffectScreen::startAnimation(const QPointF &oldPos, VirtualDesktop *cu
+     m_motionX.setPosition(m_startPos.x() * virtualSpaceSize.width());
+     m_motionY.setAnchor(m_endPos.y() * virtualSpaceSize.height());
+     m_motionY.setPosition(m_startPos.y() * virtualSpaceSize.height());
++
++    if (fromGesture) {
++        const QPointF distance = m_endPos - m_startPos;
++        if (!qFuzzyIsNull(distance.x())) {
++            m_motionX.setVelocity(velocity.x() * virtualSpaceSize.width());
++        }
++        if (!qFuzzyIsNull(distance.y())) {
++            m_motionY.setVelocity(velocity.y() * virtualSpaceSize.height());
++        }
++    }
+     m_clock.reset();
+ 
+     effects->addRepaint(m_screen->geometry());
+@@ -506,6 +524,9 @@ void SlideEffectScreen::desktopChanging(VirtualDesktop *old, QPointF desktopOffs
+         prepareSwitching();
+     }
+ 
++    if (m_state != State::ActiveGesture) {
++        m_gestureTracker.reset();
++    }
+     m_state = State::ActiveGesture;
+     m_movingWindow = with;
+ 
+@@ -520,6 +541,8 @@ void SlideEffectScreen::desktopChanging(VirtualDesktop *old, QPointF desktopOffs
+         m_gesturePos = moveInsideDesktopGrid(m_gesturePos);
+     }
+ 
++    m_gestureTracker.push(desktopOffset);
++
+     effects->addRepaint(m_screen->geometry());
+ }
+ 
+diff --git a/src/plugins/slide/slide.h b/src/plugins/slide/slide.h
+index ddfbff2..b82dee4 100644
+--- a/src/plugins/slide/slide.h
++++ b/src/plugins/slide/slide.h
+@@ -16,6 +16,7 @@
+ #include "effect/effectwindow.h"
+ #include "effect/timeline.h"
+ #include "plugins/slide/springmotion.h"
++#include "swipetracker.h"
+ 
+ namespace KWin
+ {
+@@ -97,6 +98,7 @@ private:
+     QPointF m_endPos;
+ 
+     QPointF m_gesturePos;
++    SwipeTracker m_gestureTracker;
+ 
+     EffectWindow *m_movingWindow = nullptr;
+     AnimationClock m_clock;
+diff --git a/src/swipetracker.h b/src/swipetracker.h
+new file mode 100644
+index 0000000..97d8205
+--- /dev/null
++++ b/src/swipetracker.h
+@@ -0,0 +1,119 @@
++/*
++    KWin - the KDE window manager
++    This file is part of the KDE project.
++
++    SPDX-License-Identifier: GPL-2.0-or-later
++*/
++
++#pragma once
++
++#include <QPointF>
++
++#include <chrono>
++#include <vector>
++
++namespace KWin
++{
++
++/**
++ * Keeps track of the recent movement of a swipe gesture so that the velocity of the fingers at
++ * the moment they are lifted can be estimated.
++ *
++ * This is a port of niri's SwipeTracker. The idea is that a gesture should not be judged by how
++ * far the fingers travelled, but by where the gesture would coast to a halt if the fingers kept
++ * decelerating the way they already are. Only the last 150 ms of the gesture are taken into
++ * account, so a gesture that came to rest before the fingers were lifted is not mistaken for a
++ * fling.
++ */
++class SwipeTracker
++{
++public:
++    /**
++     * How far back in time the velocity estimation reaches.
++     */
++    static constexpr std::chrono::milliseconds s_historyWindow = std::chrono::milliseconds(150);
++
++    /**
++     * How much longer, in seconds, the gesture would keep sliding after the fingers are lifted.
++     *
++     * This is the closed form of niri's deceleration model, in which the speed drops by a factor
++     * of 0.997 every millisecond: coast = velocity / (1000 * -ln(0.997)).
++     */
++    static constexpr qreal s_flingCoastSeconds = 0.3328331;
++
++    /**
++     * Records the position of the gesture at the current time.
++     */
++    void push(const QPointF &value)
++    {
++        push(value, now());
++    }
++
++    /**
++     * Records the position of the gesture at the given @a time, in milliseconds.
++     */
++    void push(const QPointF &value, qint64 time)
++    {
++        m_samples.push_back({value, time});
++        // Drop everything that is too old to describe how the fingers are moving right now.
++        // This also discards leftovers of a previous gesture.
++        while (m_samples.size() > 1 && m_samples.front().time < time - s_historyWindow.count()) {
++            m_samples.erase(m_samples.begin());
++        }
++    }
++
++    /**
++     * @returns the velocity of the gesture in units per second, based on the samples collected
++     * so far and the time elapsed since the oldest of them.
++     */
++    QPointF velocity() const
++    {
++        return velocity(now());
++    }
++
++    /**
++     * @returns the velocity of the gesture in units per second at the given @a time, in
++     * milliseconds. The idle time between the last recorded sample and @a time is accounted for,
++     * so releasing a gesture long after it stalled yields no velocity.
++     */
++    QPointF velocity(qint64 time) const
++    {
++        if (m_samples.size() < 2) {
++            return QPointF();
++        }
++        const Sample &first = m_samples.front();
++        const Sample &last = m_samples.back();
++        const qreal elapsed = (time - first.time) / 1000.0;
++        if (elapsed <= 0.) {
++            return QPointF();
++        }
++        return (last.value - first.value) / elapsed;
++    }
++
++    /**
++     * Forgets everything that has been recorded so far.
++     */
++    void reset()
++    {
++        m_samples.clear();
++    }
++
++    /**
++     * @returns the current monotonic time in milliseconds.
++     */
++    static qint64 now()
++    {
++        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
++    }
++
++private:
++    struct Sample
++    {
++        QPointF value;
++        qint64 time;
++    };
++
++    std::vector<Sample> m_samples;
++};
++
++}
+diff --git a/src/virtualdesktops.cpp b/src/virtualdesktops.cpp
+index 9b504ac..624abed 100644
+--- a/src/virtualdesktops.cpp
++++ b/src/virtualdesktops.cpp
+@@ -35,7 +35,10 @@ namespace KWin
+ {
+ 
+ static bool s_loadingDesktopSettings = false;
+-static const double GESTURE_SWITCH_THRESHOLD = .25;
++// The gesture is committed by rounding the fling-projected offset to the nearest desktop,
++// so half a desktop is the tipping point. The old value of .25 was a fixed distance
++// threshold with no regard for finger velocity.
++static const double GESTURE_SWITCH_THRESHOLD = .5;
+ 
+ static QString generateDesktopId()
+ {
+@@ -780,6 +783,7 @@ void VirtualDesktopManager::initShortcuts()
+     connect(m_swipeGestureReleasedX.get(), &QAction::triggered, this, &VirtualDesktopManager::gestureReleasedX);
+     connect(m_swipeGestureReleasedY.get(), &QAction::triggered, this, &VirtualDesktopManager::gestureReleasedY);
+     const auto emitCurrentChanging = [this]() {
++        m_gestureOffsetTracker.push(m_currentDesktopOffset);
+         if (m_perOutputVirtualDesktops) {
+             LogicalOutput *output = workspace()->activeOutput();
+             Q_EMIT currentChanging(currentDesktop(output), m_currentDesktopOffset, output);
+@@ -833,18 +837,25 @@ void VirtualDesktopManager::gestureReleasedY()
+ {
+     // The horizontal gesture cancels this action (and vice versa) as soon as the swipe axis
+     // is known. Bail out then, so that an unrelated axis doesn't wipe out the offset that
+-    // the actual gesture has accumulated.
++    // the actual gesture has accumulated. The tracker must not be touched on the way out
++    // either: it is cleared below, by whichever axis actually resolves the gesture.
+     if (m_currentDesktopOffset.y() == 0) {
+         return;
+     }
+ 
++    const QPointF velocity = m_gestureOffsetTracker.velocity();
++    m_gestureOffsetTracker.reset();
++    const QPointF projected = m_currentDesktopOffset + velocity * SwipeTracker::s_flingCoastSeconds;
++
+     auto current = currentDesktop();
+     // Note that if desktop wrapping is disabled and there's no desktop above or below,
+-    // above() and below() will return the current desktop.
++    // above() and below() will return the current desktop. The decision is taken on the
++    // offset projected to where the gesture would coast to a halt, so a fast flick switches
++    // even if it stayed short, while a stalled drag does not.
+     VirtualDesktop *target = current;
+-    if (m_currentDesktopOffset.y() <= -GESTURE_SWITCH_THRESHOLD) {
++    if (projected.y() <= -GESTURE_SWITCH_THRESHOLD) {
+         target = above(current, isNavigationWrappingAround());
+-    } else if (m_currentDesktopOffset.y() >= GESTURE_SWITCH_THRESHOLD) {
++    } else if (projected.y() >= GESTURE_SWITCH_THRESHOLD) {
+         target = below(current, isNavigationWrappingAround());
+     }
+ 
+@@ -864,13 +875,19 @@ void VirtualDesktopManager::gestureReleasedX()
+         return;
+     }
+ 
++    const QPointF velocity = m_gestureOffsetTracker.velocity();
++    m_gestureOffsetTracker.reset();
++    const QPointF projected = m_currentDesktopOffset + velocity * SwipeTracker::s_flingCoastSeconds;
++
+     // Note that if desktop wrapping is disabled and there's no desktop to left or right,
+-    // toLeft() and toRight() will return the current desktop.
++    // toLeft() and toRight() will return the current desktop. The decision is taken on the
++    // offset projected to where the gesture would coast to a halt, so a fast flick switches
++    // even if it stayed short, while a stalled drag does not.
+     VirtualDesktop *current = currentDesktop();
+     VirtualDesktop *target = current;
+-    if (m_currentDesktopOffset.x() <= -GESTURE_SWITCH_THRESHOLD) {
++    if (projected.x() <= -GESTURE_SWITCH_THRESHOLD) {
+         target = toLeft(current, isNavigationWrappingAround());
+-    } else if (m_currentDesktopOffset.x() >= GESTURE_SWITCH_THRESHOLD) {
++    } else if (projected.x() >= GESTURE_SWITCH_THRESHOLD) {
+         target = toRight(current, isNavigationWrappingAround());
+     }
+ 
+diff --git a/src/virtualdesktops.h b/src/virtualdesktops.h
+index 2952bd7..ac67c9e 100644
+--- a/src/virtualdesktops.h
++++ b/src/virtualdesktops.h
+@@ -9,6 +9,7 @@
+ #pragma once
+ // KWin
+ #include "effect/globals.h"
++#include "swipetracker.h"
+ #include <kwin_export.h>
+ // Qt includes
+ #include <QAction>
+@@ -602,6 +603,7 @@ private:
+     std::unique_ptr<QAction> m_swipeGestureReleasedY;
+     std::unique_ptr<QAction> m_swipeGestureReleasedX;
+     QPointF m_currentDesktopOffset = QPointF(0, 0);
++    SwipeTracker m_gestureOffsetTracker;
+ 
+     KWIN_SINGLETON_VARIABLE(VirtualDesktopManager, s_manager)
+ };
