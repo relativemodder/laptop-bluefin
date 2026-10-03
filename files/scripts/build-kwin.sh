@@ -103,7 +103,8 @@ if ! grep -q 'KWIN_BUILD_ACTIVITIES:BOOL=ON' "${BUILD_ROOT}/kwin/CMakeCache.txt"
     exit 1
 fi
 
-if ! strings "${PREFIX_ROOT}/usr/bin/kwin_wayland" | grep -q -e 'no-kactivities'; then
+strings "${PREFIX_ROOT}/usr/bin/kwin_wayland" > "${WORKDIR}/kwin_wayland.strings"
+if ! grep -q -e 'no-kactivities' "${WORKDIR}/kwin_wayland.strings"; then
     printf 'The built KWin binary does not register the no-kactivities option\n' >&2
     exit 1
 fi
