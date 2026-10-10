@@ -12,6 +12,8 @@ snippets:
           gettext \
           git \
           libdrm-devel \
+          libeis-devel \
+          libevdev-devel \
           libepoxy-devel \
           libinput-devel \
           libwayland-client \
@@ -22,7 +24,9 @@ snippets:
           mesa-libgbm-devel \
           meson \
           ninja-build \
+          pipewire-devel \
           pkgconf-pkg-config \
+          qaccessibilityclient-qt6-devel \
           qt6-qtbase-devel \
           qt6-qtbase-private-devel \
           qt6-qtdeclarative-devel \
@@ -66,9 +70,12 @@ snippets:
           kwayland-devel \
           kscreenlocker-devel \
           plasma-activities-devel \
+          libplasma-devel \
           libcap-devel \
           libcanberra-devel \
           libdisplay-info-devel \
+          libX11-devel \
+          libXi-devel \
           libxcvt-devel \
           libxkbcommon-devel \
           libxkbcommon-x11-devel \
@@ -83,4 +90,5 @@ snippets:
     RUN chmod +x /usr/local/bin/build-kwin.sh && \
         /usr/local/bin/build-kwin.sh && \
         cp -a /out/. / && \
+        setcap cap_sys_nice=ep /usr/bin/kwin_wayland && \
         rm -rf /out /usr/local/bin/build-kwin.sh

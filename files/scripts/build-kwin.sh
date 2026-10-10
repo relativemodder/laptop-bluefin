@@ -45,7 +45,11 @@ cmake_install_project() {
     )
 
     if [[ "${name}" == kwin ]]; then
-        cmake_options+=(-DKWIN_BUILD_ACTIVITIES=ON)
+        cmake_options+=(
+            -DKWIN_BUILD_ACTIVITIES=ON
+            -DCMAKE_INSTALL_LIBEXECDIR=libexec
+            -DKDE_INSTALL_LIBEXECDIR=libexec
+        )
     fi
 
     cmake -S "${source}" -B "${build}" -G Ninja \
