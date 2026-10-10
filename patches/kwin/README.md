@@ -4,40 +4,48 @@ This directory contains the reproducible KWin overlay used by the image.
 
 ## Base Source
 
-The patches are pinned to KWin commit:
+The patch is pinned to KWin commit:
 
 ```text
 ab7df7ccb7c6af20f4b279cd6220f7cd3d2267d7
 ```
 
-That commit is the KWin `6.8.80` source used to verify the build. It is the same
-commit that `files/scripts/build-kwin.sh` fetches.
+That commit is the KWin `v6.7.5` tag (`effect/offscreenquickview: fix the
+render time query`). It is the same commit that `files/scripts/build-kwin.sh`
+fetches.
 
 ## Patches
 
-The patches are applied in order. The second one touches the same functions as
-the first, so it only applies once `overview-3-finger.patch` is in place.
+### discrete-swipes.patch
 
-### overview-3-finger.patch
+Touchpad and touchscreen swipes become discrete: the bound command commits
+synchronously once the initial direction is recognized (16 logical units of
+movement), instead of tracking realtime progress and deciding at finger lift.
 
-- With one desktop row, touchpad overview/grid gestures use three fingers.
-- With multiple desktop rows, three-finger vertical swipes remain desktop navigation and overview/grid fall back to four fingers.
-- Horizontal three- and four-finger desktop gestures keep their axis-specific offset and do not get reset by the cancelled gesture on the other axis.
+- Desktop switching runs the ordinary `Switch One Desktop Up/Down/Left/Right`
+  actions at direction recognition. The old release-time threshold
+  (`GESTURE_SWITCH_THRESHOLD`) and the realtime `currentChanging` offset
+  tracking are gone; `gestureReleasedX/Y`, `currentChanging`, and
+  `currentChangingCancelled` are kept only for SDK compatibility and are no
+  longer emitted by swipes. Further motion, axis changes, or lifting the
+  fingers cannot undo or repeat a committed switch.
+- Effect gestures (overview, grid, ...) are registered through a new
+  `EffectTogglableGesture::addSwipeGesture()` that hands `SwipeGesture`
+  objects directly to the input layer; `RealtimeFeedbackSwipeShortcut`
+  becomes `SwipeShortcut` and no longer carries a progress callback.
+- The overview effect drops its realtime desktop-offset tracking
+  (`desktopOffsetForScreen`, `m_screenDesktopOffsets`, and the QML
+  `deltaX`/`deltaY` overrides).
+- The QML scripting API loses `SwipeGestureHandler.progress` and
+  `cancelled`; `activated` fires once on direction recognition.
+- Ships with regression tests (`autotests/integration/discrete_swipes_test.cpp`
+  plus updates to the existing gesture, touch, and virtual-desktop tests).
+  They are not built by the image (`-DBUILD_TESTING=OFF`).
 
-### gesture-fling-commit.patch
+Touchpad vertical swipes (3 fingers) switch desktops, so overview/grid stay on
+four-finger swipes; touchscreen vertical three-finger gestures are unchanged.
 
-- Desktop switches are decided by where the gesture would coast to a halt if the
-  fingers kept decelerating the way they already are, instead of by how far they
-  travelled. The projection uses only the last 150 ms of movement and niri's
-  deceleration model (speed drops by 0.997 every millisecond).
-- The projected offset is rounded to the nearest desktop, so the switching
-  threshold becomes half a desktop instead of a fixed quarter. A fast flick
-  switches desktop even when the fingers barely moved; a drag that comes to rest
-  short of the threshold does not.
-- The velocity at the moment the fingers are lifted is handed to the slide
-  animation, which runs on a critically damped spring (`stiffness 1000`,
-  `damping ratio 1.0`) instead of the old overdamped one, so the transition
-  continues with the speed of the fingers instead of restarting from rest.
+Upstream: <https://raw.githubusercontent.com/chiezkeik/nwin-wm/kwin-6.7.5-1.3/packaging/discrete-swipes.patch>
 
 ## Apply
 
@@ -46,11 +54,8 @@ git clone https://invent.kde.org/plasma/kwin.git
 cd kwin
 git checkout --detach ab7df7ccb7c6af20f4b279cd6220f7cd3d2267d7
 
-git apply --check /path/to/laptop-bluefin/patches/kwin/overview-3-finger.patch
-git apply /path/to/laptop-bluefin/patches/kwin/overview-3-finger.patch
-
-git apply --check /path/to/laptop-bluefin/patches/kwin/gesture-fling-commit.patch
-git apply /path/to/laptop-bluefin/patches/kwin/gesture-fling-commit.patch
+git apply --check /path/to/laptop-bluefin/patches/kwin/discrete-swipes.patch
+git apply /path/to/laptop-bluefin/patches/kwin/discrete-swipes.patch
 ```
 
-The BlueBuild recipe builds KWin from source in a `containerfile` module, applies these patches, and installs the resulting files into the image.
+The BlueBuild recipe builds KWin from source in a `containerfile` module, applies this patch, and installs the resulting files into the image.

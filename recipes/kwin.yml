@@ -77,8 +77,7 @@ snippets:
           vulkan-loader-devel \
           xorg-x11-server-Xwayland-devel && \
         dnf clean all
-  - COPY patches/kwin/overview-3-finger.patch /tmp/overview-3-finger.patch
-  - COPY patches/kwin/gesture-fling-commit.patch /tmp/gesture-fling-commit.patch
+  - COPY patches/kwin/discrete-swipes.patch /tmp/discrete-swipes.patch
   - COPY files/scripts/build-kwin.sh /usr/local/bin/build-kwin.sh
   - |
     RUN chmod +x /usr/local/bin/build-kwin.sh && \

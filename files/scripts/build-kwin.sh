@@ -94,10 +94,8 @@ cmake_install_project kglobalacceld
 fetch_repo kwin \
     https://invent.kde.org/plasma/kwin.git \
     "${KWIN_COMMIT}"
-git -C "${SOURCE_ROOT}/kwin" apply --check /tmp/overview-3-finger.patch
-git -C "${SOURCE_ROOT}/kwin" apply /tmp/overview-3-finger.patch
-git -C "${SOURCE_ROOT}/kwin" apply --check /tmp/gesture-fling-commit.patch
-git -C "${SOURCE_ROOT}/kwin" apply /tmp/gesture-fling-commit.patch
+git -C "${SOURCE_ROOT}/kwin" apply --check /tmp/discrete-swipes.patch
+git -C "${SOURCE_ROOT}/kwin" apply /tmp/discrete-swipes.patch
 cmake_install_project kwin
 
 rm -rf "${WORKDIR}"
