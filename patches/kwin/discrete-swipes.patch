@@ -1,5 +1,5 @@
 diff --git a/autotests/integration/CMakeLists.txt b/autotests/integration/CMakeLists.txt
-index ac776a40b8..bc59bdac2c 100644
+index ac776a4..bc59bda 100644
 --- a/autotests/integration/CMakeLists.txt
 +++ b/autotests/integration/CMakeLists.txt
 @@ -196,6 +196,7 @@ integrationTest(NAME testVirtualKeyboardDBus SRCS test_virtualkeyboard_dbus.cpp
@@ -12,10 +12,10 @@ index ac776a40b8..bc59bdac2c 100644
  if (TARGET K::KPipeWire)
 diff --git a/autotests/integration/discrete_swipes_test.cpp b/autotests/integration/discrete_swipes_test.cpp
 new file mode 100644
-index 0000000000..41ada2852b
+index 0000000..d2000bf
 --- /dev/null
 +++ b/autotests/integration/discrete_swipes_test.cpp
-@@ -0,0 +1,170 @@
+@@ -0,0 +1,190 @@
 +/*
 +    SPDX-License-Identifier: GPL-2.0-or-later
 +*/
@@ -99,22 +99,30 @@ index 0000000000..41ada2852b
 +    QCOMPARE(desktops->current(), 3u);
 +    QCOMPARE(changed.count(), 1);
 +    pointer->processSwipeGestureUpdate(QPointF(-900, 0), 200ms);
-+    pointer->processSwipeGestureUpdate(QPointF(2000, 0), 400ms);
-+    QCOMPARE(desktops->current(), 3u);
-+    pointer->processSwipeGestureEnd(600ms);
++    QCOMPARE(desktops->current(), 3u); // Same direction never repeats.
 +    QCOMPARE(changed.count(), 1);
++    // Reversing the stroke past its starting point switches back before release.
++    pointer->processSwipeGestureUpdate(QPointF(2000, 0), 400ms);
++    QCOMPARE(desktops->current(), 2u);
++    QCOMPARE(changed.count(), 2);
++    // And re-reversing commits the original direction again.
++    pointer->processSwipeGestureUpdate(QPointF(-2000, 0), 500ms);
++    QCOMPARE(desktops->current(), 3u);
++    QCOMPARE(changed.count(), 3);
++    pointer->processSwipeGestureEnd(600ms);
++    QCOMPARE(changed.count(), 3);
 +
 +    pointer->processSwipeGestureBegin(3, 1000ms);
 +    pointer->processSwipeGestureUpdate(QPointF(-16, 0), 1020ms);
 +    QCOMPARE(desktops->current(), 4u);
 +    pointer->processSwipeGestureCancelled(1021ms);
-+    QCOMPARE(desktops->current(), 4u);
-+    QCOMPARE(changed.count(), 2);
++    QCOMPARE(desktops->current(), 4u); // Cancellation does not roll back.
++    QCOMPARE(changed.count(), 4);
 +
 +    // Preserve the desktop grid and wrapping policy, not a linear carousel.
 +    pointer->processSwipeGestureBegin(3, 2000ms);
 +    pointer->processSwipeGestureUpdate(QPointF(-16, 0), 2020ms);
-+    QCOMPARE(desktops->current(), 4u);
++    QCOMPARE(desktops->current(), 4u); // At the edge without wrapping: no-op.
 +    pointer->processSwipeGestureEnd(2040ms);
 +    desktops->setNavigationWrappingAround(true);
 +    pointer->processSwipeGestureBegin(4, 3000ms);
@@ -127,7 +135,10 @@ index 0000000000..41ada2852b
 +    pointer->processSwipeGestureBegin(3, 4000ms);
 +    pointer->processSwipeGestureUpdate(QPointF(0, -16), 4020ms);
 +    QCOMPARE(desktops->current(), 3u);
-+    pointer->processSwipeGestureEnd(4040ms);
++    // Vertical strokes reverse the same way.
++    pointer->processSwipeGestureUpdate(QPointF(0, 32), 4040ms);
++    QCOMPARE(desktops->current(), 1u);
++    pointer->processSwipeGestureEnd(4060ms);
 +}
 +
 +void DiscreteSwipesTest::overviewDoesNotChainTransitions()
@@ -144,6 +155,8 @@ index 0000000000..41ada2852b
 +    QVERIFY(overview);
 +    auto pointer = input()->pointer();
 +
++    // Opening stroke: Overview commits immediately; further motion in the same
++    // direction cannot chain into Grid.
 +    pointer->processSwipeGestureBegin(4, 0ms);
 +    pointer->processSwipeGestureUpdate(QPointF(0, -15), 10ms);
 +    QCOMPARE(overview->property("overviewPartialActivationFactor").toReal(), 0.0);
@@ -153,44 +166,51 @@ index 0000000000..41ada2852b
 +    QVERIFY(!overview->property("overviewGestureInProgress").toBool());
 +    QVERIFY(!overview->property("transitionGestureInProgress").toBool());
 +    pointer->processSwipeGestureUpdate(QPointF(0, -900), 200ms);
-+    pointer->processSwipeGestureUpdate(QPointF(0, 2000), 400ms);
 +    QCOMPARE(overview->property("overviewPartialActivationFactor").toReal(), 1.0);
 +    QCOMPARE(overview->property("gridPartialActivationFactor").toReal(), 0.0);
 +    pointer->processSwipeGestureCancelled(600ms);
 +    QCOMPARE(overview->property("overviewPartialActivationFactor").toReal(), 1.0);
 +
-+    // A separate physical stroke can move Overview into Grid immediately.
++    // A separate up-stroke moves Overview into Grid; reversing that stroke
++    // before release returns to Overview.
 +    pointer->processSwipeGestureBegin(4, 1000ms);
 +    pointer->processSwipeGestureUpdate(QPointF(0, -16), 1020ms);
 +    QCOMPARE(overview->property("gridPartialActivationFactor").toReal(), 1.0);
 +    QVERIFY(!overview->property("transitionGestureInProgress").toBool());
 +    QVERIFY(!overview->property("gridGestureInProgress").toBool());
 +    pointer->processSwipeGestureUpdate(QPointF(0, 900), 1040ms);
++    QCOMPARE(overview->property("gridPartialActivationFactor").toReal(), 0.0);
++    QCOMPARE(overview->property("overviewPartialActivationFactor").toReal(), 1.0);
 +    pointer->processSwipeGestureEnd(1060ms);
-+    QCOMPARE(overview->property("gridPartialActivationFactor").toReal(), 1.0);
 +
 +    // Grid -> Overview is likewise a command, not a reversible preview.
 +    pointer->processSwipeGestureBegin(4, 2000ms);
-+    pointer->processSwipeGestureUpdate(QPointF(0, 16), 2020ms);
-+    QCOMPARE(overview->property("gridPartialActivationFactor").toReal(), 0.0);
-+    QCOMPARE(overview->property("overviewPartialActivationFactor").toReal(), 1.0);
-+    pointer->processSwipeGestureCancelled(2040ms);
-+    QCOMPARE(overview->property("overviewPartialActivationFactor").toReal(), 1.0);
++    pointer->processSwipeGestureUpdate(QPointF(0, -16), 2020ms);
++    QCOMPARE(overview->property("gridPartialActivationFactor").toReal(), 1.0);
++    pointer->processSwipeGestureEnd(2040ms);
 +
 +    pointer->processSwipeGestureBegin(4, 3000ms);
 +    pointer->processSwipeGestureUpdate(QPointF(0, 16), 3020ms);
++    QCOMPARE(overview->property("gridPartialActivationFactor").toReal(), 0.0);
++    QCOMPARE(overview->property("overviewPartialActivationFactor").toReal(), 1.0);
++    pointer->processSwipeGestureCancelled(3040ms);
++    QCOMPARE(overview->property("overviewPartialActivationFactor").toReal(), 1.0);
++
++    pointer->processSwipeGestureBegin(4, 4000ms);
++    pointer->processSwipeGestureUpdate(QPointF(0, 16), 4020ms);
 +    QCOMPARE(overview->property("overviewPartialActivationFactor").toReal(), 0.0);
-+    pointer->processSwipeGestureEnd(3040ms);
++    QCOMPARE(overview->property("gridPartialActivationFactor").toReal(), 0.0);
++    pointer->processSwipeGestureEnd(4040ms);
 +    QTRY_VERIFY(!overview->isActive());
 +}
 +
 +WAYLANDTEST_MAIN(DiscreteSwipesTest)
 +#include "discrete_swipes_test.moc"
 diff --git a/autotests/integration/touch_input_test.cpp b/autotests/integration/touch_input_test.cpp
-index 3ed45a487a..9d741ad096 100644
+index 3ed45a4..f28124b 100644
 --- a/autotests/integration/touch_input_test.cpp
 +++ b/autotests/integration/touch_input_test.cpp
-@@ -375,39 +375,30 @@ void TouchInputTest::testGestureDetection()
+@@ -375,39 +375,36 @@ void TouchInputTest::testGestureDetection()
      return;
  #endif
  
@@ -219,10 +239,16 @@ index 3ed45a487a..9d741ad096 100644
 +    QCOMPARE(triggered.count(), 1); // Command fires before any finger lifts.
 +    Test::touchMotion(1, QPointF(100, 125), timestamp++);
 +    Test::touchMotion(0, QPointF(900, 125), timestamp++);
-+    QCOMPARE(triggered.count(), 1); // Long strokes and reversals do not repeat.
++    QCOMPARE(triggered.count(), 1); // Same direction never repeats.
++    Test::touchMotion(1, QPointF(900, 125), timestamp++);
++    QCOMPARE(triggered.count(), 1); // Reversal with no opposite binding is inert.
++    Test::touchMotion(0, QPointF(100, 125), timestamp++);
++    QCOMPARE(triggered.count(), 1); // Still short of the stroke origin.
++    Test::touchMotion(1, QPointF(100, 125), timestamp++);
++    QCOMPARE(triggered.count(), 2); // Re-reversing commits the command again.
      Test::touchUp(0, timestamp++);
 -    QVERIFY(gestureCancelled.wait());
-+    QCOMPARE(triggered.count(), 1);
++    QCOMPARE(triggered.count(), 2);
  
      Test::touchUp(1, timestamp++);
      Test::touchUp(2, timestamp++);
@@ -234,33 +260,33 @@ index 3ed45a487a..9d741ad096 100644
      Test::touchDown(1, QPointF(10000, 125), timestamp++);
      Test::touchDown(2, QPointF(125, 125), timestamp++);
 -    QVERIFY(!callbackTriggered);
-+    QCOMPARE(triggered.count(), 1);
- 
-     Test::touchUp(0, timestamp++);
-     Test::touchUp(1, timestamp++);
-@@ -418,7 +409,7 @@ void TouchInputTest::testGestureDetection()
-     timestamp += 1000;
-     Test::touchDown(1, QPointF(125, 125), timestamp++);
-     Test::touchDown(2, QPointF(125, 125), timestamp++);
--    QVERIFY(!callbackTriggered);
-+    QCOMPARE(triggered.count(), 1);
- 
-     Test::touchUp(0, timestamp++);
-     Test::touchUp(1, timestamp++);
-@@ -432,7 +423,7 @@ void TouchInputTest::testGestureDetection()
-     Test::touchMotion(0, QPointF(100, 125), timestamp++);
-     Test::touchMotion(1, QPointF(100, 125), timestamp++);
-     Test::touchMotion(2, QPointF(100, 125), timestamp++);
--    QVERIFY(callbackTriggered);
 +    QCOMPARE(triggered.count(), 2);
  
      Test::touchUp(0, timestamp++);
      Test::touchUp(1, timestamp++);
+@@ -418,7 +415,7 @@ void TouchInputTest::testGestureDetection()
+     timestamp += 1000;
+     Test::touchDown(1, QPointF(125, 125), timestamp++);
+     Test::touchDown(2, QPointF(125, 125), timestamp++);
+-    QVERIFY(!callbackTriggered);
++    QCOMPARE(triggered.count(), 2);
+ 
+     Test::touchUp(0, timestamp++);
+     Test::touchUp(1, timestamp++);
+@@ -432,7 +429,7 @@ void TouchInputTest::testGestureDetection()
+     Test::touchMotion(0, QPointF(100, 125), timestamp++);
+     Test::touchMotion(1, QPointF(100, 125), timestamp++);
+     Test::touchMotion(2, QPointF(100, 125), timestamp++);
+-    QVERIFY(callbackTriggered);
++    QCOMPARE(triggered.count(), 3);
+ 
+     Test::touchUp(0, timestamp++);
+     Test::touchUp(1, timestamp++);
 diff --git a/autotests/test_gestures.cpp b/autotests/test_gestures.cpp
-index 8e98e3c320..781dd9a6d5 100644
+index 8e98e3c..c882354 100644
 --- a/autotests/test_gestures.cpp
 +++ b/autotests/test_gestures.cpp
-@@ -1,308 +1,344 @@
+@@ -1,308 +1,403 @@
  /*
 -    KWin - the KDE window manager
 -    This file is part of the KDE project.
@@ -288,6 +314,7 @@ index 8e98e3c320..781dd9a6d5 100644
      Q_OBJECT
  private Q_SLOTS:
 +    void testImmediateCommand();
++    void testReversalBeforeRelease();
 +    void testDirection_data();
 +    void testDirection();
 +    void testCancellation();
@@ -319,19 +346,6 @@ index 8e98e3c320..781dd9a6d5 100644
 -    QTest::addColumn<QPointF>("delta");
 -    QTest::addColumn<bool>("reached");
 -    QTest::addColumn<qreal>("progress");
--
--    QTest::newRow("Up (more)") << SwipeDirection::Up << QPointF(0, -SwipeGesture::s_minimumDelta * 2) << true << 1.0;
--    QTest::newRow("Up (exact)") << SwipeDirection::Up << QPointF(0, -SwipeGesture::s_minimumDelta) << true << 1.0;
--    QTest::newRow("Up (less)") << SwipeDirection::Up << QPointF(0, -SwipeGesture::s_minimumDelta / 2) << false << 0.5;
--    QTest::newRow("Left (more)") << SwipeDirection::Left << QPointF(-SwipeGesture::s_minimumDelta * 2, 0) << true << 1.0;
--    QTest::newRow("Left (exact)") << SwipeDirection::Left << QPointF(-SwipeGesture::s_minimumDelta, 0) << true << 1.0;
--    QTest::newRow("Left (less)") << SwipeDirection::Left << QPointF(-SwipeGesture::s_minimumDelta / 2, 0) << false << 0.5;
--    QTest::newRow("Right (more)") << SwipeDirection::Right << QPointF(SwipeGesture::s_minimumDelta * 2, 0) << true << 1.0;
--    QTest::newRow("Right (exact)") << SwipeDirection::Right << QPointF(SwipeGesture::s_minimumDelta, 0) << true << 1.0;
--    QTest::newRow("Right (less)") << SwipeDirection::Right << QPointF(SwipeGesture::s_minimumDelta / 2, 0) << false << 0.5;
--    QTest::newRow("Down (more)") << SwipeDirection::Down << QPointF(0, SwipeGesture::s_minimumDelta * 2) << true << 1.0;
--    QTest::newRow("Down (exact)") << SwipeDirection::Down << QPointF(0, SwipeGesture::s_minimumDelta) << true << 1.0;
--    QTest::newRow("Down (less)") << SwipeDirection::Down << QPointF(0, SwipeGesture::s_minimumDelta / 2) << false << 0.5;
 +    GestureRecognizer recognizer;
 +    SwipeGesture up(4), down(4);
 +    up.setDirection(SwipeDirection::Up);
@@ -351,20 +365,105 @@ index 8e98e3c320..781dd9a6d5 100644
 +    recognizer.updateSwipeGesture(QPointF(0, -0.5));
 +    QCOMPARE(triggered.count(), 1); // Synchronous, before lift.
 +    recognizer.updateSwipeGesture(QPointF(0, -900));
++    QCOMPARE(triggered.count(), 1); // Same direction never repeats in a stroke.
 +    recognizer.updateSwipeGesture(QPointF(0, 2000));
-+    recognizer.updateSwipeGesture(QPointF(900, 0));
++    QCOMPARE(opposite.count(), 1); // Reversing past the origin fires back.
 +    QCOMPARE(triggered.count(), 1);
-+    QCOMPARE(opposite.count(), 0);
++    recognizer.updateSwipeGesture(QPointF(900, 0));
++    QCOMPARE(opposite.count(), 1); // Latched direction, even on the far side.
 +    recognizer.endSwipeGesture();
 +    QCOMPARE(triggered.count(), 1);
++    QCOMPARE(opposite.count(), 1);
 +    QCOMPARE(cancelled.count(), 0);
 +    QCOMPARE(started.count(), 0); // No interactive swipe lifecycle.
++}
+ 
+-    QTest::newRow("Up (more)") << SwipeDirection::Up << QPointF(0, -SwipeGesture::s_minimumDelta * 2) << true << 1.0;
+-    QTest::newRow("Up (exact)") << SwipeDirection::Up << QPointF(0, -SwipeGesture::s_minimumDelta) << true << 1.0;
+-    QTest::newRow("Up (less)") << SwipeDirection::Up << QPointF(0, -SwipeGesture::s_minimumDelta / 2) << false << 0.5;
+-    QTest::newRow("Left (more)") << SwipeDirection::Left << QPointF(-SwipeGesture::s_minimumDelta * 2, 0) << true << 1.0;
+-    QTest::newRow("Left (exact)") << SwipeDirection::Left << QPointF(-SwipeGesture::s_minimumDelta, 0) << true << 1.0;
+-    QTest::newRow("Left (less)") << SwipeDirection::Left << QPointF(-SwipeGesture::s_minimumDelta / 2, 0) << false << 0.5;
+-    QTest::newRow("Right (more)") << SwipeDirection::Right << QPointF(SwipeGesture::s_minimumDelta * 2, 0) << true << 1.0;
+-    QTest::newRow("Right (exact)") << SwipeDirection::Right << QPointF(SwipeGesture::s_minimumDelta, 0) << true << 1.0;
+-    QTest::newRow("Right (less)") << SwipeDirection::Right << QPointF(SwipeGesture::s_minimumDelta / 2, 0) << false << 0.5;
+-    QTest::newRow("Down (more)") << SwipeDirection::Down << QPointF(0, SwipeGesture::s_minimumDelta * 2) << true << 1.0;
+-    QTest::newRow("Down (exact)") << SwipeDirection::Down << QPointF(0, SwipeGesture::s_minimumDelta) << true << 1.0;
+-    QTest::newRow("Down (less)") << SwipeDirection::Down << QPointF(0, SwipeGesture::s_minimumDelta / 2) << false << 0.5;
++static SwipeDirection oppositeOf(SwipeDirection direction)
++{
++    switch (direction) {
++    case SwipeDirection::Up:
++        return SwipeDirection::Down;
++    case SwipeDirection::Down:
++        return SwipeDirection::Up;
++    case SwipeDirection::Left:
++        return SwipeDirection::Right;
++    case SwipeDirection::Right:
++        return SwipeDirection::Left;
++    case SwipeDirection::Invalid:
++        break;
++    }
++    return SwipeDirection::Invalid;
  }
  
 -void GestureTest::testMinimumDeltaReached()
-+void GestureTest::testDirection_data()
++void GestureTest::testReversalBeforeRelease()
  {
--    GestureRecognizer recognizer;
+     GestureRecognizer recognizer;
++    SwipeGesture left(3), right(3);
++    left.setDirection(SwipeDirection::Left);
++    right.setDirection(SwipeDirection::Right);
++    recognizer.registerSwipeGesture(&left);
++    recognizer.registerSwipeGesture(&right);
++    QSignalSpy leftTriggered(&left, &SwipeGesture::triggered);
++    QSignalSpy rightTriggered(&right, &SwipeGesture::triggered);
++
++    QCOMPARE(recognizer.startSwipeGesture(3), 2);
++    recognizer.updateSwipeGesture(QPointF(-16, 0));
++    QCOMPARE(leftTriggered.count(), 1);
++
++    // Reversals that stay below the threshold, or short of the stroke origin,
++    // must not commit the opposite command.
++    recognizer.updateSwipeGesture(QPointF(15, 0)); // back to -1
++    QCOMPARE(rightTriggered.count(), 0);
++    recognizer.updateSwipeGesture(QPointF(16, 0)); // back to +15
++    QCOMPARE(rightTriggered.count(), 0);
++    recognizer.updateSwipeGesture(QPointF(1, 0)); // +16, past the origin
++    QCOMPARE(rightTriggered.count(), 1);
++    QCOMPARE(leftTriggered.count(), 1);
++
++    // Re-reversing commits the original direction again.
++    recognizer.updateSwipeGesture(QPointF(-32, 0)); // -16
++    QCOMPARE(leftTriggered.count(), 2);
++    QCOMPARE(rightTriggered.count(), 1);
+ 
+-    // swipe gesture
+-    SwipeGesture gesture(1);
+-    QFETCH(SwipeDirection, direction);
+-    gesture.setDirection(direction);
+-    QFETCH(QPointF, delta);
+-    QFETCH(bool, reached);
+-    QCOMPARE(gesture.minimumDeltaReached(delta), reached);
+-
+-    recognizer.registerSwipeGesture(&gesture);
+-
+-    QSignalSpy startedSpy(&gesture, &SwipeGesture::started);
+-    QSignalSpy triggeredSpy(&gesture, &SwipeGesture::triggered);
+-    QSignalSpy cancelledSpy(&gesture, &SwipeGesture::cancelled);
+-    QSignalSpy progressSpy(&gesture, &SwipeGesture::progress);
++    recognizer.endSwipeGesture();
++    QCOMPARE(leftTriggered.count(), 2);
++    QCOMPARE(rightTriggered.count(), 1);
++}
+ 
+-    recognizer.startSwipeGesture(1);
+-    QCOMPARE(startedSpy.count(), 1);
+-    QCOMPARE(triggeredSpy.count(), 0);
+-    QCOMPARE(cancelledSpy.count(), 0);
+-    QCOMPARE(progressSpy.count(), 0);
++void GestureTest::testDirection_data()
++{
 +    QTest::addColumn<QPointF>("delta");
 +    QTest::addColumn<SwipeDirection>("direction");
 +    QTest::newRow("up") << QPointF(0, -16) << SwipeDirection::Up;
@@ -377,29 +476,9 @@ index 8e98e3c320..781dd9a6d5 100644
 +    QTest::newRow("diagonal-tie-down") << QPointF(12, 12) << SwipeDirection::Down;
 +}
  
--    // swipe gesture
--    SwipeGesture gesture(1);
--    QFETCH(SwipeDirection, direction);
--    gesture.setDirection(direction);
 +void GestureTest::testDirection()
 +{
-     QFETCH(QPointF, delta);
--    QFETCH(bool, reached);
--    QCOMPARE(gesture.minimumDeltaReached(delta), reached);
--
--    recognizer.registerSwipeGesture(&gesture);
--
--    QSignalSpy startedSpy(&gesture, &SwipeGesture::started);
--    QSignalSpy triggeredSpy(&gesture, &SwipeGesture::triggered);
--    QSignalSpy cancelledSpy(&gesture, &SwipeGesture::cancelled);
--    QSignalSpy progressSpy(&gesture, &SwipeGesture::progress);
--
--    recognizer.startSwipeGesture(1);
--    QCOMPARE(startedSpy.count(), 1);
--    QCOMPARE(triggeredSpy.count(), 0);
--    QCOMPARE(cancelledSpy.count(), 0);
--    QCOMPARE(progressSpy.count(), 0);
--
++    QFETCH(QPointF, delta);
 +    QFETCH(SwipeDirection, direction);
 +    GestureRecognizer recognizer;
 +    SwipeGesture up(3), down(3), left(3), right(3);
@@ -426,13 +505,16 @@ index 8e98e3c320..781dd9a6d5 100644
 -
 +    QCOMPARE(fired, direction);
 +    QCOMPARE(count, 1);
++    // Reversing past the stroke origin commits the opposite command.
 +    recognizer.updateSwipeGesture(-10 * delta);
++    QCOMPARE(fired, oppositeOf(direction));
++    QCOMPARE(count, 2);
      recognizer.endSwipeGesture();
 -    QCOMPARE(startedSpy.count(), 1);
 -    QCOMPARE(progressSpy.count(), 1);
 -    QCOMPARE(triggeredSpy.isEmpty(), !reached);
 -    QCOMPARE(cancelledSpy.isEmpty(), reached);
-+    QCOMPARE(count, 1);
++    QCOMPARE(count, 2);
  }
  
 -void GestureTest::testMinimumScaleDelta()
@@ -842,7 +924,7 @@ index 8e98e3c320..781dd9a6d5 100644
  
  QTEST_MAIN(GestureTest)
 diff --git a/autotests/test_virtual_desktops.cpp b/autotests/test_virtual_desktops.cpp
-index 601314811d..5967472f32 100644
+index 6013148..5967472 100644
 --- a/autotests/test_virtual_desktops.cpp
 +++ b/autotests/test_virtual_desktops.cpp
 @@ -22,7 +22,7 @@ void InputRedirection::registerAxisShortcut(Qt::KeyboardModifiers modifiers, Poi
@@ -895,7 +977,7 @@ index 601314811d..5967472f32 100644
  {
      VirtualDesktopManager *vds = VirtualDesktopManager::self();
 diff --git a/src/effect/effecthandler.cpp b/src/effect/effecthandler.cpp
-index fe9e91377f..d6665859ed 100644
+index fe9e913..d666585 100644
 --- a/src/effect/effecthandler.cpp
 +++ b/src/effect/effecthandler.cpp
 @@ -702,9 +702,9 @@ void EffectsHandler::registerAxisShortcut(Qt::KeyboardModifiers modifiers, Point
@@ -923,10 +1005,10 @@ index fe9e91377f..d6665859ed 100644
  
  bool EffectsHandler::hasKeyboardGrab() const
 diff --git a/src/effect/effecthandler.h b/src/effect/effecthandler.h
-index 7d0f51673b..32c283c622 100644
+index 7d0f516..a1c430f 100644
 --- a/src/effect/effecthandler.h
 +++ b/src/effect/effecthandler.h
-@@ -236,21 +236,32 @@ public:
+@@ -236,21 +236,33 @@ public:
      void registerAxisShortcut(Qt::KeyboardModifiers modifiers, PointerAxisDirection axis, QAction *action);
  
      /**
@@ -936,8 +1018,9 @@ index 7d0f51673b..32c283c622 100644
 -     * @param direction The direction for the swipe
 -     * @param action The action which gets triggered when the gesture triggers
 +     * The action triggers synchronously once the initial direction is recognized
-+     * after 16 logical units of movement. Further motion, cancellation, and
-+     * release do not change the committed command.
++     * after 16 logical units of movement. Reversing the stroke past its starting
++     * point triggers the opposite direction's action. Cancellation and release
++     * do not change committed commands.
 +     *
 +     * @param dir The initial direction for the swipe
 +     * @param fingerCount The required number of fingers
@@ -966,7 +1049,7 @@ index 7d0f51673b..32c283c622 100644
       * @since 5.25
       */
      void registerTouchscreenSwipeShortcut(SwipeDirection direction, uint fingerCount, QAction *action, std::function<void(qreal)> progressCallback);
-@@ -784,17 +795,14 @@ Q_SIGNALS:
+@@ -784,17 +796,14 @@ Q_SIGNALS:
      void desktopChanged(KWin::VirtualDesktop *oldDesktop, KWin::VirtualDesktop *newDesktop, KWin::EffectWindow *with, KWin::LogicalOutput *output);
  
      /**
@@ -989,7 +1072,7 @@ index 7d0f51673b..32c283c622 100644
      void desktopChangingCancelled();
      void desktopAdded(KWin::VirtualDesktop *desktop);
 diff --git a/src/effect/effecttogglablestate.cpp b/src/effect/effecttogglablestate.cpp
-index 01c02ecab7..95d7da496f 100644
+index 01c02ec..95d7da4 100644
 --- a/src/effect/effecttogglablestate.cpp
 +++ b/src/effect/effecttogglablestate.cpp
 @@ -6,6 +6,9 @@
@@ -1067,7 +1150,7 @@ index 01c02ecab7..95d7da496f 100644
  
  EffectTogglableTouchBorder::EffectTogglableTouchBorder(EffectTogglableState *state)
 diff --git a/src/effect/effecttogglablestate.h b/src/effect/effecttogglablestate.h
-index 6bbbcc5ff6..8577b3e5fc 100644
+index 6bbbcc5..8577b3e 100644
 --- a/src/effect/effecttogglablestate.h
 +++ b/src/effect/effecttogglablestate.h
 @@ -117,6 +117,7 @@ public:
@@ -1079,7 +1162,7 @@ index 6bbbcc5ff6..8577b3e5fc 100644
  };
  
 diff --git a/src/gestures.cpp b/src/gestures.cpp
-index e9c950bee3..c577eba7a8 100644
+index e9c950b..fb7ca6e 100644
 --- a/src/gestures.cpp
 +++ b/src/gestures.cpp
 @@ -12,6 +12,7 @@
@@ -1128,7 +1211,7 @@ index e9c950bee3..c577eba7a8 100644
  }
  
  void GestureRecognizer::registerPinchGesture(KWin::PinchGesture *gesture)
-@@ -114,152 +100,96 @@ void GestureRecognizer::unregisterPinchGesture(KWin::PinchGesture *gesture)
+@@ -114,152 +100,120 @@ void GestureRecognizer::unregisterPinchGesture(KWin::PinchGesture *gesture)
      }
  }
  
@@ -1167,18 +1250,34 @@ index e9c950bee3..c577eba7a8 100644
 +        if (gesture->fingerCount() == fingerCount) {
 +            m_activeSwipeGestures.append(gesture);
          }
--
++    }
++    return m_activeSwipeGestures.size();
++}
+ 
 -        m_activeSwipeGestures << gesture;
 -        count++;
 -        Q_EMIT gesture->started();
++static SwipeDirection opposite(SwipeDirection direction)
++{
++    switch (direction) {
++    case SwipeDirection::Down:
++        return SwipeDirection::Up;
++    case SwipeDirection::Left:
++        return SwipeDirection::Right;
++    case SwipeDirection::Up:
++        return SwipeDirection::Down;
++    case SwipeDirection::Right:
++        return SwipeDirection::Left;
++    case SwipeDirection::Invalid:
++        break;
      }
 -    return count;
-+    return m_activeSwipeGestures.size();
++    return SwipeDirection::Invalid;
  }
  
  void GestureRecognizer::updateSwipeGesture(const QPointF &delta)
  {
-+    if ((m_swipeState & 7) != 1) {
++    if ((m_swipeState & 7) == 0) {
 +        return;
 +    }
      m_currentDelta += delta;
@@ -1222,7 +1321,7 @@ index e9c950bee3..c577eba7a8 100644
 +    } else {
 +        direction = m_currentDelta.y() < 0 ? SwipeDirection::Up : SwipeDirection::Down;
      }
--
+ 
 -    // Eliminate wrong gestures (takes two iterations)
 -    for (int i = 0; i < 2; i++) {
 -        if (m_activeSwipeGestures.isEmpty()) {
@@ -1236,14 +1335,23 @@ index e9c950bee3..c577eba7a8 100644
 -                Q_EMIT g->cancelled();
 -                it = m_activeSwipeGestures.erase(it);
 -                continue;
++    // A committed direction only yields to its opposite, and only once the
++    // stroke has travelled back past its starting point by the threshold.
++    // That keeps the stroke axis stable and makes jitter around the origin
++    // of a direction change inert.
++    const uint32_t phase = m_swipeState & 7;
++    if (phase > 1 && direction != opposite(SwipeDirection(phase - 1))) {
++        return;
++    }
 +    m_swipeState = (m_swipeState & ~uint32_t(7)) | (uint32_t(direction) + 1);
 +
 +    // Snapshot eligibility before any command changes the state of another binding.
-+    // Keep the stroke latched, even if no binding matches this initial direction.
-+    m_activeSwipeGestures.removeIf([direction](const QPointer<SwipeGesture> &gesture) {
++    // Candidates stay registered for the rest of the stroke so a reversal can
++    // dispatch the opposite command; the stroke latches even when nothing matches.
++    auto gestures = m_activeSwipeGestures;
++    gestures.removeIf([direction](const QPointer<SwipeGesture> &gesture) {
 +        return !gesture || gesture->direction() != direction || !gesture->isEnabled();
 +    });
-+    auto gestures = std::move(m_activeSwipeGestures);
 +    const auto generation = m_swipeState;
 +    const QPointer<GestureRecognizer> guard(this);
 +    for (const auto &gesture : gestures) {
@@ -1258,9 +1366,6 @@ index e9c950bee3..c577eba7a8 100644
 -            it++;
          }
      }
-+    // Reuse the candidate storage on the next stroke; reentrant strokes returned above.
-+    gestures.clear();
-+    m_activeSwipeGestures = std::move(gestures);
 +}
  
 -    // Send progress update
@@ -1331,7 +1436,7 @@ index e9c950bee3..c577eba7a8 100644
      for (PinchGesture *gesture : std::as_const(m_pinchGestures)) {
          if (gesture->fingerCount() != fingerCount) {
              continue;
-@@ -313,7 +243,6 @@ void GestureRecognizer::cancelPinchGesture()
+@@ -313,7 +267,6 @@ void GestureRecognizer::cancelPinchGesture()
      cancelActiveGestures();
      m_currentScale = 1;
      m_currentFingerCount = 0;
@@ -1339,7 +1444,7 @@ index e9c950bee3..c577eba7a8 100644
  }
  
  void GestureRecognizer::endPinchGesture() // because fingers up
-@@ -329,7 +258,6 @@ void GestureRecognizer::endPinchGesture() // because fingers up
+@@ -329,7 +282,6 @@ void GestureRecognizer::endPinchGesture() // because fingers up
      m_activePinchGestures.clear();
      m_currentScale = 1;
      m_currentFingerCount = 0;
@@ -1347,7 +1452,7 @@ index e9c950bee3..c577eba7a8 100644
  }
  
  uint32_t SwipeGesture::fingerCount() const
-@@ -362,9 +290,9 @@ void PinchGesture::setDirection(PinchDirection direction)
+@@ -362,9 +314,9 @@ void PinchGesture::setDirection(PinchDirection direction)
      m_direction = direction;
  }
  
@@ -1360,7 +1465,7 @@ index e9c950bee3..c577eba7a8 100644
  
  }
 diff --git a/src/gestures.h b/src/gestures.h
-index 6b698c47e6..153bf90ccf 100644
+index 6b698c4..e1824dd 100644
 --- a/src/gestures.h
 +++ b/src/gestures.h
 @@ -15,6 +15,7 @@
@@ -1420,7 +1525,7 @@ index 6b698c47e6..153bf90ccf 100644
  
  private:
      const uint32_t m_fingerCount;
-@@ -140,22 +128,20 @@ public:
+@@ -140,22 +128,21 @@ public:
  
  private:
      void cancelActiveGestures();
@@ -1443,13 +1548,14 @@ index 6b698c47e6..153bf90ccf 100644
      uint m_currentFingerCount = 0;
 -    Axis m_currentSwipeAxis = Axis::None;
 +    // Keep the stock recognizer layout: the former axis word also stores the
-+    // stroke generation. Low three bits: idle (0), recognizing (1), or direction + 1.
++    // stroke generation. Low three bits: idle (0), recognizing (1), or the
++    // last committed direction + 1.
 +    uint32_t m_swipeState = 0;
  };
  
  }
 diff --git a/src/globalshortcuts.cpp b/src/globalshortcuts.cpp
-index 29ec1ba076..7d5b512e07 100644
+index 29ec1ba..7d5b512 100644
 --- a/src/globalshortcuts.cpp
 +++ b/src/globalshortcuts.cpp
 @@ -33,14 +33,10 @@ GlobalShortcut::GlobalShortcut(Shortcut &&sc, QAction *action)
@@ -1523,7 +1629,7 @@ index 29ec1ba076..7d5b512e07 100644
  
  void GlobalShortcutsManager::processPinchStart(uint fingerCount)
 diff --git a/src/globalshortcuts.h b/src/globalshortcuts.h
-index 0fc316359f..4b1bfefc64 100644
+index 0fc3163..4b1bfef 100644
 --- a/src/globalshortcuts.h
 +++ b/src/globalshortcuts.h
 @@ -69,13 +69,13 @@ public:
@@ -1566,7 +1672,7 @@ index 0fc316359f..4b1bfefc64 100644
  class GlobalShortcut
  {
 diff --git a/src/input.cpp b/src/input.cpp
-index fc75e54e8c..80f6ad8451 100644
+index fc75e54..80f6ad8 100644
 --- a/src/input.cpp
 +++ b/src/input.cpp
 @@ -1211,15 +1211,10 @@ public:
@@ -1624,7 +1730,7 @@ index fc75e54e8c..80f6ad8451 100644
  }
  
 diff --git a/src/input.h b/src/input.h
-index b607ebbcaa..8470450d58 100644
+index b607ebb..8470450 100644
 --- a/src/input.h
 +++ b/src/input.h
 @@ -108,7 +108,7 @@ public:
@@ -1637,7 +1743,7 @@ index b607ebbcaa..8470450d58 100644
      void registerTouchscreenSwipeShortcut(SwipeDirection direction, uint32_t fingerCount, QAction *action, std::function<void(qreal)> progressCallback = {});
      void forceRegisterTouchscreenSwipeShortcut(SwipeDirection direction, uint32_t fingerCount, QAction *action, std::function<void(qreal)> progressCallback = {});
 diff --git a/src/plugins/overview/overvieweffect.cpp b/src/plugins/overview/overvieweffect.cpp
-index d9be30e813..2e3b7feb8d 100644
+index d9be30e..2e3b7fe 100644
 --- a/src/plugins/overview/overvieweffect.cpp
 +++ b/src/plugins/overview/overvieweffect.cpp
 @@ -105,27 +105,6 @@ OverviewEffect::OverviewEffect()
@@ -1681,7 +1787,7 @@ index d9be30e813..2e3b7feb8d 100644
  {
      return OverviewConfig::ignoreMinimized();
 diff --git a/src/plugins/overview/overvieweffect.h b/src/plugins/overview/overvieweffect.h
-index 57ef2e24fc..7b0a3dab7f 100644
+index 57ef2e2..7b0a3da 100644
 --- a/src/plugins/overview/overvieweffect.h
 +++ b/src/plugins/overview/overvieweffect.h
 @@ -49,8 +49,6 @@ public:
@@ -1710,7 +1816,7 @@ index 57ef2e24fc..7b0a3dab7f 100644
      bool m_filterWindows = true;
      int m_animationDuration = 400;
 diff --git a/src/plugins/overview/qml/Main.qml b/src/plugins/overview/qml/Main.qml
-index 209d63131c..9ecc2f0ecf 100644
+index 209d631..9ecc2f0 100644
 --- a/src/plugins/overview/qml/Main.qml
 +++ b/src/plugins/overview/qml/Main.qml
 @@ -33,7 +33,6 @@ FocusScope {
@@ -1761,7 +1867,7 @@ index 209d63131c..9ecc2f0ecf 100644
 -    }
  }
 diff --git a/src/plugins/slide/slide.cpp b/src/plugins/slide/slide.cpp
-index 7d0a71cba9..6c825df3c8 100644
+index 7d0a71c..6c825df 100644
 --- a/src/plugins/slide/slide.cpp
 +++ b/src/plugins/slide/slide.cpp
 @@ -37,10 +37,6 @@ SlideEffect::SlideEffect()
@@ -1878,7 +1984,7 @@ index 7d0a71cba9..6c825df3c8 100644
  {
      if (SlideEffectScreen *slideScreen = getSlideEffectScreen(w->screen())) {
 diff --git a/src/plugins/slide/slide.h b/src/plugins/slide/slide.h
-index ddfbff2416..939c9159bd 100644
+index ddfbff2..939c915 100644
 --- a/src/plugins/slide/slide.h
 +++ b/src/plugins/slide/slide.h
 @@ -24,11 +24,7 @@ namespace KWin
@@ -1943,7 +2049,7 @@ index ddfbff2416..939c9159bd 100644
      void windowDeleted(EffectWindow *w);
  
 diff --git a/src/scripting/gesturehandler.cpp b/src/scripting/gesturehandler.cpp
-index 15195604c6..2534fc501d 100644
+index 1519560..2534fc5 100644
 --- a/src/scripting/gesturehandler.cpp
 +++ b/src/scripting/gesturehandler.cpp
 @@ -31,8 +31,6 @@ void SwipeGestureHandler::componentComplete()
@@ -1976,7 +2082,7 @@ index 15195604c6..2534fc501d 100644
  {
      return m_deviceType;
 diff --git a/src/scripting/gesturehandler.h b/src/scripting/gesturehandler.h
-index f896bde51e..9c67b1a304 100644
+index f896bde..dbb19f1 100644
 --- a/src/scripting/gesturehandler.h
 +++ b/src/scripting/gesturehandler.h
 @@ -52,14 +52,6 @@ class SwipeGestureHandler : public QObject, public QQmlParserStatus
@@ -2004,14 +2110,15 @@ index f896bde51e..9c67b1a304 100644
      Device deviceType() const;
      void setDeviceType(Device device);
  
-@@ -122,19 +111,12 @@ Q_SIGNALS:
+@@ -122,19 +111,13 @@ Q_SIGNALS:
      /*!
       * \qmlsignal SwipeGestureHandler::activated()
       *
 -     * This signal is emitted when the swipe gesture is triggered, i.e. the progress() reaches 1.0.
 +     * Emitted synchronously once the initial direction is recognized after
-+     * 16 logical units of movement. Further motion, cancellation, and release
-+     * cannot undo or repeat the command; lift before starting another swipe.
++     * 16 logical units of movement. Reversing the stroke past its starting
++     * point emits the opposite direction's handler. Cancellation and release
++     * cannot undo or repeat committed commands.
       */
      void activated();
  
@@ -2027,7 +2134,7 @@ index f896bde51e..9c67b1a304 100644
      void directionChanged();
      void fingerCountChanged();
      void deviceTypeChanged();
-@@ -143,7 +125,6 @@ private:
+@@ -143,7 +126,6 @@ private:
      std::unique_ptr<SwipeGesture> m_gesture;
      Direction m_direction = Direction::Invalid;
      Device m_deviceType = Device::Touchpad;
@@ -2036,7 +2143,7 @@ index f896bde51e..9c67b1a304 100644
  };
  
 diff --git a/src/virtualdesktops.cpp b/src/virtualdesktops.cpp
-index a7414d2b26..2fb45a6d61 100644
+index a7414d2..2fb45a6 100644
 --- a/src/virtualdesktops.cpp
 +++ b/src/virtualdesktops.cpp
 @@ -35,7 +35,6 @@ namespace KWin
@@ -2170,7 +2277,7 @@ index a7414d2b26..2fb45a6d61 100644
  
  void VirtualDesktopManager::initSwitchToShortcuts()
 diff --git a/src/virtualdesktops.h b/src/virtualdesktops.h
-index 2952bd7356..58def53799 100644
+index 2952bd7..58def53 100644
 --- a/src/virtualdesktops.h
 +++ b/src/virtualdesktops.h
 @@ -469,18 +469,10 @@ Q_SIGNALS:
